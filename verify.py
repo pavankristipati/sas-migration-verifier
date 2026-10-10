@@ -29,7 +29,7 @@ MAX_EXAMPLES = 5
 
 
 def read(path):
-    with open(path, newline="") as f:
+    with open(path, newline="", encoding="utf-8-sig") as f:
         rows = list(csv.reader(f))
     return rows[0], rows[1:]
 
