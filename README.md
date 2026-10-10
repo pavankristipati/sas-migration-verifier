@@ -122,6 +122,8 @@ The diagrams are drawn by `docs/make_readme_figs.py`. To change one, edit that f
 
 Requires a Mac with Homebrew, a free SAS OnDemand for Academics account (register as an independent learner at welcome.oda.sas.com) and an Anthropic API key.
 
+Read the [Disclaimer](#disclaimer) before you run anything.
+
 1. Install Java 17, which Spark needs.
    ```
    brew install openjdk@17
@@ -234,3 +236,11 @@ Requires a Mac with Homebrew, a free SAS OnDemand for Academics account (registe
 - Final correctness check at 100,000 loans against SAS
 - Speed test at 1,000,000 loans on the Mac and on Databricks Free Edition
 - Broader edge-case data for the other nine programs, such as rates exactly on a tier boundary
+
+## Disclaimer
+
+This is a personal learning project, built on my own time with invented data. It is not affiliated with or endorsed by any employer.
+
+The code is provided as is, with no warranty of any kind. I am not responsible for any damage, data loss, or cost that comes from running it. Read the code before you run it and use invented or test data only. Do not point it at real customer data or at production systems.
+
+Model calls are billed to your own Anthropic account, so watch your API spend.
