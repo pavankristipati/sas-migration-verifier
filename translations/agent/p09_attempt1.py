@@ -1,57 +1,75 @@
-from pyspark.sql import Window
 from pyspark.sql import functions as F
+from pyspark.sql import Window
 
 
 def run(spark, loans, payments):
-    # Keep loans with a non-blank product (SAS excludes missing CLASS levels)
-    # and a numeric original_amount (SAS ignores missing analysis values).
-    valid = (
+    # Product is a $12 variable in SAS: values are truncated to 12 characters.
+    # Blank or missing products are excluded from the CLASS grouping (nway).
+    prod = (
         loans
-        .where(F.col("product").isNotNull() & (F.trim(F.col("product")) != ""))
-        .withColumn("amt", F.expr("try_cast(original_amount as double)"))
-        .where(F.col("amt").isNotNull())
-        .select("product", "amt")
+        .withColumn("product", F.substring(F.col("product"), 1, 12))
+        .where(F.col("product").isNotNull() & (F.col("product") != ""))
+        .select("product", F.col("original_amount").cast("double").alias("amt"))
     )
 
-    w_prod = Window.partitionBy("product")
+    groups = prod.select("product").distinct()
+
+    # Only nonmissing amounts contribute to N and the percentiles.
+    vals = prod.where(F.col("amt").isNotNull())
+
+    nstats = vals.groupBy("product").agg(F.count("amt").cast("long").alias("n"))
+
+    w = Window.partitionBy("product").orderBy("amt")
     ranked = (
-        valid
-        .withColumn("rk", F.row_number().over(Window.partitionBy("product").orderBy("amt")))
-        .withColumn("n", F.count("amt").over(w_prod))
+        vals.withColumn("rn", F.row_number().over(w))
+        .join(nstats, "product")
+        .select("product", "amt", "rn", "n")
     )
 
-    stats = (
-        valid.groupBy("product")
-        .agg(F.count("amt").alias("n"))
-    )
-
-    def pctl(p, name):
-        # SAS PROC MEANS default percentile definition (QNTLDEF=5):
-        # pos = n*p + 0.5; interpolate between x_j and x_{j+1}, clipped to [1, n].
-        s = (
-            stats
+    # SAS default percentile definition (QNTLDEF=5):
+    # pos = n*p + 0.5, linear interpolation between x[floor(pos)] and x[floor(pos)+1],
+    # clipped to the first and last observation.
+    def pct(p, name):
+        q = (
+            nstats
             .withColumn("pos", F.col("n") * F.lit(p) + F.lit(0.5))
-            .withColumn("j", F.floor(F.col("pos")).cast("long"))
-            .withColumn("g", F.col("pos") - F.col("j").cast("double"))
-            .withColumn("lo", F.least(F.greatest(F.col("j"), F.lit(1)), F.col("n")))
-            .withColumn("hi", F.least(F.greatest(F.col("j") + 1, F.lit(1)), F.col("n")))
+            .withColumn("j", F.floor(F.col("pos")))
+            .withColumn("g", F.col("pos") - F.col("j"))
+            .withColumn(
+                "jc",
+                F.least(F.greatest(F.col("j"), F.lit(1)), F.col("n")).cast("long"),
+            )
+            .withColumn(
+                "jh",
+                F.least(F.greatest(F.col("j") + 1, F.lit(1)), F.col("n")).cast("long"),
+            )
         )
-        a = ranked.select("product", F.col("rk").alias("lo"), F.col("amt").alias("xlo"))
-        b = ranked.select("product", F.col("rk").alias("hi"), F.col("amt").alias("xhi"))
-        joined = s.join(a, ["product", "lo"]).join(b, ["product", "hi"])
-        return joined.select(
-            "product",
-            ((F.lit(1.0) - F.col("g")) * F.col("xlo") + F.col("g") * F.col("xhi")).alias(name),
+        a1 = ranked.select(
+            "product", F.col("rn").alias("jc"), F.col("amt").alias("x_lo")
+        )
+        a2 = ranked.select(
+            "product", F.col("rn").alias("jh"), F.col("amt").alias("x_hi")
+        )
+        return (
+            q.join(a1, ["product", "jc"], "left")
+             .join(a2, ["product", "jh"], "left")
+             .withColumn(name, F.col("x_lo") + F.col("g") * (F.col("x_hi") - F.col("x_lo")))
+             .select("product", name)
         )
 
-    med = pctl(0.5, "median_amount")
-    p90 = pctl(0.9, "p90_amount")
+    med = pct(0.5, "median_amount")
+    p90 = pct(0.9, "p90_amount")
 
     result = (
-        stats
-        .join(med, "product")
-        .join(p90, "product")
-        .select("product", "n", "median_amount", "p90_amount")
+        groups
+        .join(nstats, "product", "left")
+        .join(med, "product", "left")
+        .join(p90, "product", "left")
+        .withColumn("n", F.coalesce(F.col("n"), F.lit(0)).cast("long"))
+        .withColumn("median_amount", F.round(F.col("median_amount"), 2))
+        .withColumn("p90_amount", F.round(F.col("p90_amount"), 2))
         .orderBy("product")
+        .select("product", "n", "median_amount", "p90_amount")
     )
+
     return result

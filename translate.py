@@ -39,6 +39,7 @@ from run_pyspark import run_one, spark_session
 HERE = Path(__file__).parent
 OUT_DIR = HERE / "translations" / "agent"
 LOG = HERE / "logs" / "attempts.jsonl"
+MAX_OUTPUT_TOKENS = 8000
 
 SYSTEM = """You translate SAS programs into PySpark.
 
@@ -105,12 +106,13 @@ class Model:
         if self.dry_run:
             ref = HERE / "translations" / "reference" / f"{name}.py"
             text = f"```python\n{ref.read_text()}```" if ref.exists() else "```python\ndef run(spark, loans, payments):\n    return loans\n```"
-            return text, 0, 0
+            return text, 0, 0, False
         resp = self.client.messages.create(
-            model=self.model_name, max_tokens=4000, system=SYSTEM, messages=messages
+            model=self.model_name, max_tokens=MAX_OUTPUT_TOKENS, system=SYSTEM, messages=messages
         )
         text = "".join(b.text for b in resp.content if b.type == "text")
-        return text, resp.usage.input_tokens, resp.usage.output_tokens
+        cut_off = resp.stop_reason == "max_tokens"
+        return text, resp.usage.input_tokens, resp.usage.output_tokens, cut_off
 
 
 def translate(spark, model, sas_path, max_attempts, run_id):
@@ -125,12 +127,17 @@ def translate(spark, model, sas_path, max_attempts, run_id):
 
     for attempt in range(1, max_attempts + 1):
         t0 = time.time()
-        text, tok_in, tok_out = model.ask(messages, name)
+        text, tok_in, tok_out, cut_off = model.ask(messages, name)
         code = extract_code(text)
         code_path.write_text(code)
 
         reason = blocked_reason(code)
-        if reason:
+        if cut_off:
+            ok, report = False, (
+                f"Your reply was cut off at the {MAX_OUTPUT_TOKENS}-token limit, so the code is incomplete. "
+                "Reply again with the complete module, shorter: no explanations and few comments."
+            )
+        elif reason:
             ok, report = False, reason
         else:
             try:
@@ -144,6 +151,7 @@ def translate(spark, model, sas_path, max_attempts, run_id):
         log({
             "run_id": run_id, "program": name, "attempt": attempt, "model": model.model_name,
             "copy": "practice", "pass": ok, "input_tokens": tok_in, "output_tokens": tok_out,
+            "cut_off": cut_off,
             "seconds": round(time.time() - t0, 1), "report": report,
         })
         print(f"{name} attempt {attempt}: {'PASS' if ok else 'FAIL'}  ({tok_in} in / {tok_out} out tokens)")
