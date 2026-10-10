@@ -49,11 +49,25 @@ def run_program(sas, sas_file: Path, size: str, copy: str) -> None:
     print(f"{sas_file.name} {size}/{copy}: saved answer_key/{size}/{name}_{size}_{copy}.csv")
 
 
+def upload_copy(sas, size, copy):
+    """Create the folder on SAS OnDemand if needed and upload the two CSV files."""
+    remote = f"/home/{sas.symget('sysuserid')}/lab/data/{size}/{copy}"
+    sas.submit(f'options dlcreatedir; libname _up "{remote}"; libname _up clear;')
+    for name in ["loans.csv", "payments.csv"]:
+        got = sas.upload(str(HERE / "data" / size / copy / name), f"{remote}/{name}")
+        if not got["Success"]:
+            sys.exit(f"Upload failed for {copy}/{name}: {got['LOG']}")
+    print(f"Uploaded data/{size}/{copy} to {remote}")
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("sas_files", nargs="*")
     ap.add_argument("--size", default="1k")
     ap.add_argument("--test", action="store_true")
+    ap.add_argument("--copies", nargs="+", default=["practice", "hidden"])
+    ap.add_argument("--upload", action="store_true",
+                    help="upload data/<size>/<copy>/*.csv to SAS OnDemand first")
     args = ap.parse_args()
 
     sas = connect()
@@ -62,7 +76,11 @@ if __name__ == "__main__":
         sas.endsas()
         sys.exit(0)
 
+    if args.upload:
+        for copy in args.copies:
+            upload_copy(sas, args.size, copy)
+
     for f in args.sas_files:
-        for copy in ["practice", "hidden"]:
+        for copy in args.copies:
             run_program(sas, Path(f), args.size, copy)
     sas.endsas()

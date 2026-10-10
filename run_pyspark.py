@@ -83,7 +83,7 @@ if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("translation")
     ap.add_argument("--size", default="1k")
-    ap.add_argument("--copy", default="practice", choices=["practice", "hidden"])
+    ap.add_argument("--copy", default="practice", choices=["practice", "hidden", "edge"])
     args = ap.parse_args()
 
     spark = spark_session()
