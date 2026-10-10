@@ -1,0 +1,7 @@
+# Python packages for the lab. Install with: pip install -r requirements.txt
+# Needs Python 3.10 or newer and Java 17 or 21 (PySpark runs on Java).
+pyspark>=4.0,<5        # runs the PySpark translations on your laptop
+pandas>=2.2,<3         # PySpark does not yet fully support pandas 3
+pyarrow>=18            # PySpark needs it to move results into pandas quickly
+anthropic>=0.40        # calls Claude Haiku (translator) and Claude Sonnet (reviewer)
+saspy>=5.100           # talks to SAS OnDemand for Academics to make answer keys

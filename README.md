@@ -139,7 +139,7 @@ Read the [Disclaimer](#disclaimer) before you run anything.
    cd sas-migration-verifier
    python3 -m venv .venv
    source .venv/bin/activate
-   pip install pyspark "pandas<3" pyarrow saspy anthropic
+   pip install -r requirements.txt
    ```
    You should see: `(.venv)` at the start of your prompt.
 
@@ -208,8 +208,8 @@ Read the [Disclaimer](#disclaimer) before you run anything.
 | `401 ... invalid x-api-key` | The Anthropic key expired | Picking it back up, step 2 |
 | `module 'translation' has no attribute 'run'` | The model's reply was cut off before the code ended | Use the current `translate.py`, which allows 8,000 tokens and tells the model when it was cut off |
 | Reviewer answers show `UNREADABLE` | An early `judge.py` could not find the verdict inside the reviewer's reasoning | Use the current `judge.py` |
-| `PySpark does not yet fully support pandas >= 3.0.0` | pandas 3 is installed | `pip install "pandas<3"` |
-| `PyArrow >= 18.0.0 must be installed` | pyarrow is missing; Spark falls back to a slower path | `pip install pyarrow` |
+| `PySpark does not yet fully support pandas >= 3.0.0` | pandas 3 is installed | `pip install -r requirements.txt` (it pins pandas below 3) |
+| `PyArrow >= 18.0.0 must be installed` | pyarrow is missing; Spark falls back to a slower path | `pip install -r requirements.txt` |
 | `WARN Utils: Your hostname ... resolves to a loopback address` | Normal on a Mac | Safe to ignore |
 | No SAS OnDemand login yet | Registration is approved by email | Check spam and wait for the welcome email |
 
