@@ -1,0 +1,5 @@
+product,loans,delinquent_loans,low_balance_loans,total_balance
+AUTO,266,29,7,5170933.50
+CARD,240,19,9,1096965.76
+HELOC,260,21,5,11868373.11
+MORTGAGE,234,20,5,48732525.52
