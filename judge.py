@@ -53,7 +53,7 @@ def load_cases():
         latest[r["program"]] = max(latest.get(r["program"], ""), r["run_id"])
     cases = []
     for r in rows:
-        if r["copy"] != "practice" or r["run_id"] != latest[r["program"]]:
+        if not r["copy"].startswith("practice") or r["run_id"] != latest[r["program"]]:
             continue
         if not (r["report"].startswith("PASS") or r["report"].startswith("FAIL")):
             continue

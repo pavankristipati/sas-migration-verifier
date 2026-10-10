@@ -62,7 +62,11 @@ Output:
 
 Rules:
 - Do not read or write any files, start processes, or use the network.
-  Use only pyspark (and the Python standard library if needed).
+  Use only pyspark, the sas_compat module below, and the Python standard library.
+- Some Spark functions follow different rules than SAS. Where a SAS function has
+  a match in sas_compat, use it. Do not use the Spark function in its place.
+    SAS propcase(x)  ->  from sas_compat import propcase; propcase(col)
+                         (do not use F.initcap: it only capitalizes after a blank)
 - Reply with the complete module in one ```python code block and nothing else."""
 
 BLOCKED = [
@@ -70,6 +74,12 @@ BLOCKED = [
     r"\b__import__\b", r"\beval\s*\(", r"\bexec\s*\(", r"spark\.read", r"\.write\b",
     r"answer_key", r"\bshutil\b", r"\bpathlib\b", r"requests\b", r"urllib",
 ]
+
+# Spark functions that do not match SAS. Code that uses one is rejected before it
+# runs, with a pointer to the sas_compat function that does match.
+NOT_SAS = {
+    r"\binitcap\b": "F.initcap does not match SAS PROPCASE. Use propcase from sas_compat.",
+}
 
 
 def expected_columns(name):
@@ -86,6 +96,9 @@ def blocked_reason(code):
     for pattern in BLOCKED:
         if re.search(pattern, code):
             return f"Code rejected before running: it matches the blocked pattern {pattern!r}. Do not touch files, processes, or the network."
+    for pattern, fix in NOT_SAS.items():
+        if re.search(pattern, code):
+            return f"Code rejected before running: {fix}"
     return None
 
 
@@ -115,6 +128,15 @@ class Model:
         return text, resp.usage.input_tokens, resp.usage.output_tokens, cut_off
 
 
+def practice_copies(name):
+    """Copies the model is checked against while it works: practice, plus the
+    edge copy when SAS has made an answer key for it."""
+    copies = ["practice"]
+    if (HERE / "answer_key" / "1k" / f"{name}_1k_edge.csv").exists():
+        copies.append("edge")
+    return copies
+
+
 def translate(spark, model, sas_path, max_attempts, run_id):
     name = sas_path.stem.split("_")[0]
     columns = expected_columns(name)
@@ -141,8 +163,12 @@ def translate(spark, model, sas_path, max_attempts, run_id):
             ok, report = False, reason
         else:
             try:
-                ok, problems, _ = run_one(spark, str(code_path), "1k", "practice")
-                report = "PASS" if ok else "FAIL\n" + "\n".join(problems)
+                ok, report = True, "PASS"
+                for copy in practice_copies(name):
+                    ok, problems, _ = run_one(spark, str(code_path), "1k", copy)
+                    if not ok:
+                        report = f"FAIL on the {copy} copy of the data\n" + "\n".join(problems)
+                        break
             except Exception:
                 ok = False
                 lines = traceback.format_exc().strip().splitlines()
@@ -150,7 +176,7 @@ def translate(spark, model, sas_path, max_attempts, run_id):
 
         log({
             "run_id": run_id, "program": name, "attempt": attempt, "model": model.model_name,
-            "copy": "practice", "pass": ok, "input_tokens": tok_in, "output_tokens": tok_out,
+            "copy": "+".join(practice_copies(name)), "pass": ok, "input_tokens": tok_in, "output_tokens": tok_out,
             "cut_off": cut_off,
             "seconds": round(time.time() - t0, 1), "report": report,
         })
