@@ -1,42 +1,48 @@
 from pyspark.sql import functions as F
 from pyspark.sql.types import DecimalType
+from sas_compat import propcase
 
 
 def run(spark, loans, payments):
-    # Mirror SAS fixed-length character variables (length $12 truncates).
-    src = loans.select(
-        F.substring(F.col("product"), 1, 12).alias("product"),
-        F.substring(F.col("branch"), 1, 12).alias("branch"),
-        # Exact decimal arithmetic avoids binary floating-point drift in sums,
-        # so ties at the cent level round the same way SAS does.
-        F.col("original_amount").cast(DecimalType(38, 10)).alias("original_amount"),
+    # SAS character variables have fixed length: product and branch are $12,
+    # so values are truncated to 12 characters on input.
+    # Comparisons ignore trailing blanks, so product is right-trimmed before comparing.
+    auto = (
+        loans
+        .withColumn("_prod", F.rtrim(F.substring(F.col("product"), 1, 12)))
+        .filter(F.col("_prod") == F.lit("AUTO"))
+        .withColumn("_br", F.substring(F.col("branch"), 1, 12))
+        .withColumn(
+            "branch_name",
+            F.rtrim(F.substring(propcase(F.col("_br")), 1, 12))
+        )
+        # Exact decimal arithmetic avoids binary floating-point error in the sum.
+        # Non-numeric or blank values become null, which SUM ignores (as SAS does).
+        .withColumn("_amt", F.col("original_amount").cast(DecimalType(38, 6)))
     )
 
-    # SAS character comparison ignores trailing blanks.
-    auto = src.where(F.rtrim(F.col("product")) == F.lit("AUTO"))
-
-    # PROPCASE: lowercase everything, then capitalize first letter of each word.
-    # Missing branch becomes a blank string in SAS, so coalesce to "".
-    auto = auto.withColumn(
-        "branch_name",
-        F.substring(
-            F.initcap(F.lower(F.coalesce(F.col("branch"), F.lit("")))), 1, 12
-        ),
-    )
-
-    result = (
+    # SAS SUM ignores missing values; count(*) counts every row in the group.
+    agg = (
         auto.groupBy("branch_name")
         .agg(
-            F.count(F.lit(1)).cast("long").alias("loans"),
-            F.sum("original_amount").alias("_total"),
+            F.count(F.lit(1)).alias("loans"),
+            F.sum("_amt").alias("_total"),
         )
+    )
+
+    # round(sum, 0.01) then format 15.2: Spark decimal round is HALF_UP,
+    # matching SAS rounding of halves away from zero.
+    result = (
+        agg
         .select(
-            "branch_name",
-            "loans",
-            # HALF_UP rounding on the exact decimal sum to 2 places.
-            F.round(F.col("_total"), 2).cast(DecimalType(18, 2)).alias("total_original"),
+            F.col("branch_name"),
+            F.col("loans").cast("int").alias("loans"),
+            F.round(F.col("_total"), 2)
+             .cast(DecimalType(15, 2))
+             .alias("total_original"),
         )
         .orderBy("branch_name")
+        .select("branch_name", "loans", "total_original")
     )
 
     return result
