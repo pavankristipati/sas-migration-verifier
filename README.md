@@ -15,15 +15,17 @@ A home lab that has a small AI model translate SAS programs into PySpark, proves
 
 Claude Haiku translated ten SAS programs into PySpark. A plain Python check, the verifier, ran SAS and PySpark on the same data and compared their output tables. With the verifier's short reports, Haiku got all ten to match SAS, and every one also matched on a copy of the data it never saw.
 
-A stronger model, Claude Sonnet, then read each translation without data and said whether it matched SAS. It approved two translations the verifier proved wrong, giving the same wrong answer on all three asks. It also flagged a translation the verifier had passed, and it was right: the test data had no hyphenated branch names, and SAS and Spark capitalize those differently.
+A stronger model, Claude Sonnet, then read each translation without data and said whether it matched SAS. It approved two first drafts the verifier had already failed, giving the same wrong answer on all three asks. Both kept trailing spaces in product names, and Haiku fixed both on its next try. Sonnet also flagged a translation the verifier had passed, and it was right: the test data had no hyphenated branch names, and SAS capitalizes WINSTON-SALEM as Winston-Salem while Spark's `initcap` gives Winston-salem.
 
-Use an AI reviewer to find the inputs your test data is missing. Use a check that runs both programs and compares output to decide what ships. Keep SAS running until that check passes.
+I fixed that difference once, in `sas_compat.py`, a small library of PySpark functions that follow SAS's rules. The translator is told to use it, Spark's `initcap` is blocked, and the edge data with hyphenated names is now part of the check. Haiku's new p04 passed practice, edge and hidden data on its second try.
+
+Use an AI reviewer to find the inputs your test data is missing. Fix each SAS-versus-Spark difference once, in a shared library. Use a check that runs both programs and compares output to decide what ships. Keep SAS running until that check passes.
 
 ## How it works
 
 ![How a SAS program gets translated and checked: SAS program, translator (Claude Haiku), runner, verifier compared with the SAS answer key. On FAIL the translator gets a short report and tries again, up to 5 times. On PASS the code runs once on a hidden copy of the data.](docs/how-it-works.png)
 
-Haiku writes the PySpark. The runner runs it on the practice data. The verifier compares the output with the table real SAS produced. A failure sends Haiku a short report with at most five example rows, and it tries again. A pass is followed by one run on the hidden copy, which Haiku never sees.
+Haiku writes the PySpark. The runner runs it on the practice data, plus the edge data when SAS has made an answer key for it. The verifier compares the output with the table real SAS produced. A failure sends Haiku a short report with at most five example rows, and it tries again. A pass is followed by one run on the hidden copy, which Haiku never sees.
 
 ![The AI reviewer experiment: the SAS program and one graded PySpark attempt go to Claude Sonnet, which reads both without data and answers SAME or DIFFERENT three times. Its answers are scored against the verifier.](docs/reviewer-experiment.png)
 
@@ -52,12 +54,20 @@ The diagrams are drawn by `docs/make_readme_figs.py`. To change one, edit that f
 | Code the verifier passed that the reviewer correctly flagged | 1 (p04 second draft, proven with edge-case data) |
 | Right code the reviewer rejected at least once | 1 (p05 second draft, 1 of 3 asks) |
 
+| p04 rerun with SAS-style `propcase` | Result |
+|---|---|
+| Old p04 (Spark `initcap`) on edge data | FAIL, 4 of 10 branch rows differ |
+| New p04, attempt 1 | FAIL on practice data: Pittsburgh total off by one cent |
+| New p04, attempt 2 | PASS on practice and edge data |
+| New p04, hidden copy | PASS |
+
 ## Where each step lives
 
 | Step | File |
 |---|---|
 | Build practice and hidden data (1k, 100k, 1m loans) | `make_data.py` |
 | Build edge-case data with hyphenated branch names | `make_edge_data.py` |
+| PySpark functions that follow SAS's rules, such as `propcase` | `sas_compat.py` |
 | The ten SAS programs and the folder setup | `sas/` |
 | Connect to SAS OnDemand | `sascfg_personal.py` |
 | Upload data, run SAS, download answer keys | `run_sas.py` |
@@ -80,7 +90,7 @@ The diagrams are drawn by `docs/make_readme_figs.py`. To change one, edit that f
 |---|---|---|---|
 | Deterministic vs. probabilistic | Use a deterministic check as the gate and the AI reviewer as advice | The verifier gave the same verdict on every rerun. The reviewer changed its answer on 2 of 16 cases | The verifier decides PASS or FAIL. The reviewer's output only adds test cases |
 | Hallucination | A confident, specific explanation can still be wrong | The reviewer approved p07 and p10 three times each with plausible reasons, and both were wrong | Never accept a reviewer's SAME without an output check |
-| Evals | A passing test means the code matched on the data you tested | p04 passed practice and hidden data, then failed on WINSTON-SALEM | Ask the reviewer for inputs that would break each program and add them to the test data |
+| Evals | A passing test means the code matched on the data you tested | p04 passed practice and hidden data, then failed on WINSTON-SALEM | Added hyphenated names to the edge data and made the edge data part of the check, so p04 now passes all three copies |
 | Evals | Test the check before trusting it | My SAS error check fired on `_ERROR_`, a normal variable in SAS's own export code | `test_verifier.py` runs the verifier against known-broken copies of every answer key |
 | Agent limits | A limit set too low looks like the model failing | Two of p09's replies were cut off at 4,000 tokens; the passing reply was 7,615 | Raised the cap to 8,000 and told the model when a reply was cut off |
 | Prompt injection and excessive agency | The model's code runs on my machine, so it gets the least access possible | The runner reads and writes all files; model code only receives data and returns a table | Code that opens files, starts processes or uses the network is rejected before it runs |
@@ -90,6 +100,7 @@ The diagrams are drawn by `docs/make_readme_figs.py`. To change one, edit that f
 | Category | Lesson | What happened | What I changed |
 |---|---|---|---|
 | Separation of duties | The code writer cannot edit the code checker | Haiku only returns code as text and never sees `verify.py` | The checker is fixed for the whole run |
+| Change management | First make the new code match SAS exactly; change behavior later, on purpose | Spark's `initcap` and SAS's PROPCASE capitalize hyphenated names differently | `sas_compat.py` copies the SAS rule once; the translator must use it and `initcap` is blocked |
 | Change management | Every SAS quirk is a business decision | SAS counts blank balances as under $1,000 and cuts branch names at 12 characters | Each quirk goes to the report owner to copy or fix |
 | Data protection | The model never sees the data | Failure reports carry at most five example rows | Token use is the same at 1,000 rows or a million |
 | Third-party risk | Lab data goes to two outside services | Invented data is uploaded to SAS OnDemand; code and short reports go to Anthropic | Only invented data is used. Production would need vendor review |
@@ -103,6 +114,7 @@ The diagrams are drawn by `docs/make_readme_figs.py`. To change one, edit that f
 | The model memorizes the practice answers | Hidden copy run once at the end, never shown to the model | `translate.py` |
 | The verifier itself is wrong | Tested against deliberately broken copies before use | `test_verifier.py` |
 | Model code reads the answer key or touches the network | Blocked-pattern check before running; runner owns all file access | `translate.py`, `run_pyspark.py` |
+| A Spark built-in quietly differs from SAS | `sas_compat.py` functions copy SAS; the Spark version is rejected before it runs | `sas_compat.py`, `translate.py` |
 | Runaway spend | At most 5 attempts per program and an output cap per reply | `translate.py` |
 | Data sent to the model | Reports limited to 5 example rows | `verify.py` |
 
@@ -230,12 +242,15 @@ Read the [Disclaimer](#disclaimer) before you run anything.
 | Deterministic | Same input always gives the same answer |
 | Probabilistic | The same input can give different answers |
 | Harness | The scripts around a model that feed it work and check its output |
+| Like-for-like migration | Moving code so the new system gives exactly the old system's output, before anything is improved |
+| Compatibility function | A small function in the new system that copies a rule from the old one, such as `propcase` in `sas_compat.py` |
 
 ## Not yet done
 
 - Final correctness check at 100,000 loans against SAS
 - Speed test at 1,000,000 loans on the Mac and on Databricks Free Edition
 - Broader edge-case data for the other nine programs, such as rates exactly on a tier boundary
+- More compatibility functions in `sas_compat.py` for other SAS-versus-Spark differences (rounding, percentiles, blank-value comparisons, INTCK), each proven against SAS output
 
 ## Disclaimer
 
