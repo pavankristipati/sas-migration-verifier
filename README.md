@@ -21,47 +21,19 @@ Use an AI reviewer to find the inputs your test data is missing. Use a check tha
 
 ## How it works
 
-```mermaid
-flowchart LR
-    S[SAS program] --> T[Translator<br/>Claude Haiku]
-    T --> R[Runner<br/>runs PySpark on practice data]
-    R --> V{Verifier<br/>compare with SAS answer key}
-    K[SAS answer key<br/>from SAS OnDemand] --> V
-    V -- FAIL: short report --> T
-    V -- PASS --> H[Final check<br/>hidden copy, run once]
-```
+![How a SAS program gets translated and checked: SAS program, translator (Claude Haiku), runner, verifier compared with the SAS answer key. On FAIL the translator gets a short report and tries again, up to 5 times. On PASS the code runs once on a hidden copy of the data.](docs/how-it-works.png)
 
-```mermaid
-flowchart LR
-    S2[SAS program] --> A[AI reviewer<br/>Claude Sonnet, no data]
-    P2[PySpark translation] --> A
-    A --> D[SAME or DIFFERENT<br/>asked 3 times]
-    D --> C[Scored against the verifier]
-```
+Haiku writes the PySpark. The runner runs it on the practice data. The verifier compares the output with the table real SAS produced. A failure sends Haiku a short report with at most five example rows, and it tries again. A pass is followed by one run on the hidden copy, which Haiku never sees.
+
+![The AI reviewer experiment: the SAS program and one graded PySpark attempt go to Claude Sonnet, which reads both without data and answers SAME or DIFFERENT three times. Its answers are scored against the verifier.](docs/reviewer-experiment.png)
+
+After the loop, a separate experiment gives each graded attempt to Claude Sonnet with no data and scores its SAME or DIFFERENT answers against what the verifier proved.
 
 ## Where it runs
 
-```mermaid
-flowchart LR
-    subgraph Mac[MacBook]
-        M[make_data.py] --> DATA[(data/)]
-        RP[run_pyspark.py<br/>PySpark, local] 
-        TR[translate.py]
-        J[judge.py]
-        VF[verify.py]
-    end
-    subgraph SAS[SAS OnDemand for Academics, SAS's cloud]
-        SP[SAS programs] --> OUT[(lab/out)]
-    end
-    subgraph AN[Anthropic API]
-        H[Claude Haiku]
-        SN[Claude Sonnet]
-    end
-    DATA -- upload via SASPy --> SAS
-    OUT -- download via SASPy --> AK[(answer_key/)]
-    TR <--> H
-    J <--> SN
-```
+![Where each part runs: SAS OnDemand runs the SAS programs on invented data. The Mac builds data, runs PySpark and the verifier, and calls the AI models. The Anthropic API gets code and short reports, never the data.](docs/where-it-runs.png)
+
+The diagrams are drawn by `docs/make_readme_figs.py`. To change one, edit that file and run `python docs/make_readme_figs.py` from the repo root.
 
 ## Results
 
@@ -94,6 +66,7 @@ flowchart LR
 | Test the verifier against known-broken copies | `test_verifier.py` |
 | Run a PySpark translation and verify it | `run_pyspark.py` |
 | Hand-written reference translations | `translations/reference/` |
+| Draw the README diagrams | `docs/make_readme_figs.py` |
 | Translator loop with Claude Haiku | `translate.py` |
 | Every translation attempt Haiku made | `translations/agent/` |
 | AI reviewer experiment | `judge.py` |
@@ -170,7 +143,8 @@ Requires a Mac with Homebrew, a free SAS OnDemand for Academics account (registe
 
 3. Add SAS's encryption files to SASPy. Download the package from support.sas.com/downloads/package.htm?pid=2494, unzip it to `~/Downloads/SAS-ODA-JarFiles`, then:
    ```
-   IOM=$(python -c "import saspy, os; print(os.path.join(os.path.dirname(saspy.__file__), 'java', 'iomclient'))")
+   IOM=$(python -c \
+     "import saspy, os; print(os.path.dirname(saspy.__file__))")/java/iomclient
    cp ~/Downloads/SAS-ODA-JarFiles/*.jar "$IOM"/
    ```
    You should see: `ls "$IOM"` lists `sas.rutil.jar`, `sas.rutil.nls.jar` and `sastpj.rutil.jar`.
@@ -259,4 +233,4 @@ Requires a Mac with Homebrew, a free SAS OnDemand for Academics account (registe
 
 - Final correctness check at 100,000 loans against SAS
 - Speed test at 1,000,000 loans on the Mac and on Databricks Free Edition
-- Broader edge-case data for the other nine programs, such as rates exactly on a tier boundary# SAS migration verifier
+- Broader edge-case data for the other nine programs, such as rates exactly on a tier boundary
