@@ -8,6 +8,7 @@ A home lab that has a small AI model translate SAS programs into PySpark, proves
 |---|---|---|
 | A leader deciding how to check an AI-assisted SAS migration | [Summary for leaders](#summary-for-leaders), [Results](#results), [Lessons](#lessons) | 5 minutes |
 | New to SAS, PySpark or AI agents | [How it works](#how-it-works), [Glossary](#glossary) | 10 minutes |
+| Someone checking their own migration | [Try the check on your own migration](#try-the-check-on-your-own-migration) | 5 minutes |
 | An engineer reviewing the design | [How it works](#how-it-works), [Where each step lives](#where-each-step-lives), [Risks and protections](#risks-and-protections), [From laptop to production](#from-laptop-to-production) | 15 minutes |
 | Someone who wants to run it | [Setup on a new machine](#setup-on-a-new-machine), [Picking it back up after a break](#picking-it-back-up-after-a-break), [Troubleshooting](#troubleshooting) | 60 minutes |
 
@@ -20,6 +21,35 @@ A stronger model, Claude Sonnet, then read each translation without data and sai
 I fixed that difference once, in `sas_compat.py`, a small library of PySpark functions that follow SAS's rules. The translator is told to use it, Spark's `initcap` is blocked, and the edge data with hyphenated names is now part of the check. Haiku's new p04 passed practice, edge and hidden data on its second try.
 
 Use an AI reviewer to find the inputs your test data is missing. Fix each SAS-versus-Spark difference once, in a shared library. Use a check that runs both programs and compares output to decide what ships. Keep SAS running until that check passes.
+
+## Try the check on your own migration
+
+You do not need this lab's setup to use the verifier. `verify.py` uses only Python's built-in modules and runs on Windows, Mac or Linux.
+
+1. At the end of the SAS program, export its final table as CSV:
+   ```sas
+   proc export data=work.final_table outfile="/some/folder/sas_output.csv"
+       dbms=csv replace;
+   run;
+   ```
+2. At the end of the migrated PySpark code, save the same table as CSV (`result` is the final DataFrame; this suits tables up to a few million rows):
+   ```python
+   result.toPandas().to_csv("new_output.csv", index=False)
+   ```
+3. Compare them:
+   ```
+   python verify.py sas_output.csv new_output.csv
+   ```
+   You should see PASS, or FAIL with up to five example rows that differ. Row order does not matter. Numbers must match to the decimals SAS printed, and blanks must match blanks.
+
+Example from this lab, the first p04 translation on branch names with hyphens:
+
+```
+FAIL
+  4 of 10 rows differ
+  Row 'Wilkes-Barre': branch_name: expected 'Wilkes-Barre', got 'Wilkes-barre'
+  Row 'Winston-Sale': branch_name: expected 'Winston-Sale', got 'Winston-sale'
+```
 
 ## How it works
 
